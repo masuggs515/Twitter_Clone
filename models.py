@@ -175,6 +175,9 @@ class Message(db.Model):
 
     __tablename__ = 'messages'
 
+    def __repr__(self):
+        return f"<Message text={self.text}>"
+
     id = db.Column(
         db.Integer,
         primary_key=True,

@@ -15,7 +15,7 @@ from models import db, connect_db, Message, User
 # before we import our app, since that will have already
 # connected to the database
 
-os.environ['DATABASE_URL'] = "postgresql:///warbler-test"
+os.environ['DATABASE_URL'] = "postgresql:///warbler_test"
 
 
 # Now we can import app
@@ -37,10 +37,10 @@ class MessageViewTestCase(TestCase):
     """Test views for messages."""
 
     def setUp(self):
-        """Create test client, add sample data."""
+        """Create test user and data."""
 
-        User.query.delete()
-        Message.query.delete()
+        db.drop_all()
+        db.create_all()
 
         self.client = app.test_client()
 
@@ -48,6 +48,8 @@ class MessageViewTestCase(TestCase):
                                     email="test@test.com",
                                     password="testuser",
                                     image_url=None)
+        self.testuser_id = 25
+        self.testuser.id = self.testuser_id
 
         db.session.commit()
 
@@ -57,17 +59,77 @@ class MessageViewTestCase(TestCase):
         # Since we need to change the session to mimic logging in,
         # we need to use the changing-session trick:
 
-        with self.client as c:
-            with c.session_transaction() as sess:
+        with self.client as client:
+            with client.session_transaction() as sess:
                 sess[CURR_USER_KEY] = self.testuser.id
 
             # Now, that session setting is saved, so we can have
             # the rest of ours test
 
-            resp = c.post("/messages/new", data={"text": "Hello"})
+            resp = client.post("/messages/new", data={"text": "Hello"})
 
             # Make sure it redirects
             self.assertEqual(resp.status_code, 302)
 
             msg = Message.query.one()
             self.assertEqual(msg.text, "Hello")
+
+    def test_no_user(self):
+        with self.client as client:
+            res = client.post("/messages/new", data={"text": "Hello" }, follow_redirects=True)
+            html = res.get_data(as_text=True)
+
+            self.assertEqual(res.status_code, 200)
+            self.assertIn("Access unauthorized", html)
+
+    
+    def test_show_message(self):
+
+        m = Message(
+            id=10,
+            text="message test",
+            user_id=self.testuser_id
+        )
+        db.session.add(m)
+        db.session.commit()
+
+        with self.client as client:
+            with client.session_transaction() as sess:
+                sess[CURR_USER_KEY] = self.testuser.id
+
+            m = Message.query.get_or_404(10)
+            res = client.get(f'/messages/{m.id}')
+            html = res.get_data(as_text=True)
+
+            self.assertEqual(res.status_code, 200)
+            self.assertIn("message test", html)
+
+    def test_delete_message(self):
+
+        m = Message(
+            id=10,
+            text="message test",
+            user_id=self.testuser_id
+        )
+        db.session.add(m)
+        db.session.commit()
+
+        with self.client as client:
+            with client.session_transaction() as sess:
+                sess[CURR_USER_KEY] = self.testuser.id
+
+            m = Message.query.get_or_404(10)
+            res = client.post(f'/messages/{m.id}/delete', follow_redirects=True)
+
+            self.assertEqual(res.status_code, 200)
+            test = Message.query.get(10)
+            self.assertIsNone(test)
+    
+    def test_not_show_invalid_message(self):
+        with self.client as client:
+            with client.session_transaction() as sess:
+                sess[CURR_USER_KEY] = self.testuser.id
+
+            res = client.get('/messages/4587')
+
+            self.assertEqual(res.status_code, 404)
